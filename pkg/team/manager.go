@@ -55,18 +55,20 @@ func NewManager(ghClient *gh.Client, gqlGHClient *githubv4.Client, owner string)
 	}
 
 	// If getting user failed, try to get app installations (works with installation access tokens)
-	installations, _, instErr := ghClient.Apps.ListInstallations(context.Background(), &gh.ListOptions{PerPage: 1})
-	if instErr == nil && len(installations) > 0 {
+	// installations, _, instErr := ghClient.Apps.ListInstallations(context.Background(), &gh.ListOptions{PerPage: 1})
+	app, _, appErr := ghClient.Apps.Get(context.Background(), "")
+	if appErr == nil {
 		// Get the app info from the first installation
 		return &Manager{
-			owner:             owner,
-			ghClient:          ghClient,
-			gqlGHClient:       gqlGHClient,
-			AuthenticatedUser: installations[0].GetAppSlug(),
+			owner:       owner,
+			ghClient:    ghClient,
+			gqlGHClient: gqlGHClient,
+			// AuthenticatedUser: installations[0].GetAppSlug(),
+			AuthenticatedUser: app.GetSlug(),
 		}, nil
 	}
 
-	return nil, fmt.Errorf("failed to authenticate as user or app: user error: %v, installation error: %v", err, instErr)
+	return nil, fmt.Errorf("failed to authenticate as user or app: user error: %v, app error: %v", err, appErr)
 }
 
 // PullConfiguration returns a *config.Config by querying the organization teams.
