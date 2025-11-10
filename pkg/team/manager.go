@@ -42,8 +42,9 @@ type Manager struct {
 }
 
 func NewManager(ghClient *gh.Client, gqlGHClient *githubv4.Client, owner string) (*Manager, error) {
+	ctx := context.Background()
 	// Try to get the authenticated user's information first (works with PATs)
-	user, _, err := ghClient.Users.Get(context.Background(), "")
+	user, _, err := ghClient.Users.Get(ctx, "")
 	if err == nil {
 		// Successfully got user, this is a PAT
 		return &Manager{
@@ -54,21 +55,45 @@ func NewManager(ghClient *gh.Client, gqlGHClient *githubv4.Client, owner string)
 		}, nil
 	}
 
-	// If getting user failed, try to get app installations (works with installation access tokens)
-	// installations, _, instErr := ghClient.Apps.ListInstallations(context.Background(), &gh.ListOptions{PerPage: 1})
-	app, _, appErr := ghClient.Apps.Get(context.Background(), "")
-	if appErr == nil {
-		// Get the app info from the first installation
+	// For GitHub App tokens, try to get installation repositories
+	// This works with limited-permission installation tokens
+	repos, _, repoErr := ghClient.Apps.ListRepos(ctx, &gh.ListOptions{PerPage: 1})
+	if repoErr == nil && len(repos.Repositories) > 0 {
+		// We have a valid GitHub App installation token
+		// Use a generic identifier since we can't always determine the app slug
 		return &Manager{
-			owner:       owner,
-			ghClient:    ghClient,
-			gqlGHClient: gqlGHClient,
-			// AuthenticatedUser: installations[0].GetAppSlug(),
-			AuthenticatedUser: app.GetSlug(),
+			owner:             owner,
+			ghClient:          ghClient,
+			gqlGHClient:       gqlGHClient,
+			AuthenticatedUser: "github-app",
 		}, nil
 	}
 
-	return nil, fmt.Errorf("failed to authenticate as user or app: user error: %v, app error: %v", err, appErr)
+	// Try to get app installations (works with some installation access tokens)
+	installations, _, instErr := ghClient.Apps.ListInstallations(ctx, &gh.ListOptions{PerPage: 1})
+	if instErr == nil && len(installations) > 0 {
+		// Get the app info from the first installation
+		return &Manager{
+			owner:             owner,
+			ghClient:          ghClient,
+			gqlGHClient:       gqlGHClient,
+			AuthenticatedUser: installations[0].GetAppSlug(),
+		}, nil
+	}
+
+	// As a last resort, try to access organization data directly
+	// If we can read org data, the token is valid even if we can't identify the user/app
+	_, _, orgErr := ghClient.Organizations.Get(ctx, owner)
+	if orgErr == nil {
+		return &Manager{
+			owner:             owner,
+			ghClient:          ghClient,
+			gqlGHClient:       gqlGHClient,
+			AuthenticatedUser: "github-app",
+		}, nil
+	}
+
+	return nil, fmt.Errorf("failed to authenticate: user error: %v, repo error: %v, installation error: %v, org error: %v", err, repoErr, instErr, orgErr)
 }
 
 // PullConfiguration returns a *config.Config by querying the organization teams.
