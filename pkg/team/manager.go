@@ -42,18 +42,31 @@ type Manager struct {
 }
 
 func NewManager(ghClient *gh.Client, gqlGHClient *githubv4.Client, owner string) (*Manager, error) {
-	// Get the authenticated user's information
+	// Try to get the authenticated user's information first (works with PATs)
 	user, _, err := ghClient.Users.Get(context.Background(), "")
-	if err != nil {
-		return nil, fmt.Errorf("Error getting user: %v\n", err)
+	if err == nil {
+		// Successfully got user, this is a PAT
+		return &Manager{
+			owner:             owner,
+			ghClient:          ghClient,
+			gqlGHClient:       gqlGHClient,
+			AuthenticatedUser: user.GetLogin(),
+		}, nil
 	}
 
-	return &Manager{
-		owner:             owner,
-		ghClient:          ghClient,
-		gqlGHClient:       gqlGHClient,
-		AuthenticatedUser: user.GetLogin(),
-	}, nil
+	// If getting user failed, try to get app installations (works with installation access tokens)
+	installations, _, instErr := ghClient.Apps.ListInstallations(context.Background(), &gh.ListOptions{PerPage: 1})
+	if instErr == nil && len(installations) > 0 {
+		// Get the app info from the first installation
+		return &Manager{
+			owner:             owner,
+			ghClient:          ghClient,
+			gqlGHClient:       gqlGHClient,
+			AuthenticatedUser: installations[0].GetAppSlug(),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("failed to authenticate as user or app: user error: %v, installation error: %v", err, instErr)
 }
 
 // PullConfiguration returns a *config.Config by querying the organization teams.
